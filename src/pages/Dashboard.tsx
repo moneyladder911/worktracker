@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, LogOut, Clock, DollarSign, Calendar, FileDown, Trash2, Edit2, Search, User, MapPin, TrendingUp, TrendingDown, BarChart3, Target } from 'lucide-react'
+import { Plus, LogOut, Clock, DollarSign, Calendar, FileDown, Trash2, Edit2, Search, User, MapPin, TrendingUp, TrendingDown, BarChart3, Trophy } from 'lucide-react'
 import { toast } from 'sonner'
 import { format, differenceInMinutes, startOfMonth, endOfMonth, isWithinInterval, parseISO, isToday, isYesterday, isTomorrow, addDays, isBefore, startOfDay, startOfWeek, endOfWeek, subWeeks, subMonths } from 'date-fns'
 import { cn } from '@/lib/utils'
@@ -20,6 +20,13 @@ const DEFAULT_LOCATIONS = [
   'Just Padel',
   'WPA (World Padel Academy)',
   'Real Rackets'
+]
+
+const TOURNAMENT_PROVIDERS = [
+  'ZY',
+  'Bati',
+  'LPT',
+  'UAEPA'
 ]
 
 // ─── Animated Number Counter ───────────────────────────────────────────────────
@@ -116,6 +123,7 @@ export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState<string>('')
   const [activeView, setActiveView] = useState<'upcoming' | 'unpaid' | 'all'>('upcoming')
   const [chartMode, setChartMode] = useState<'daily' | 'weekly' | 'monthly'>('daily')
+  const [formMode, setFormMode] = useState<'work' | 'tournament'>('work')
   const [newSession, setNewSession] = useState({
     date: format(new Date(), 'yyyy-MM-dd'),
     start_time: '09:00',
@@ -148,10 +156,12 @@ export default function Dashboard() {
 
   // ─── Duration helper (returns hours as decimal, not truncated) ──────────────
   function getDurationHours(s: any): number {
+    if (s.category === 'Tournament') return 0
     return differenceInMinutes(new Date(s.end_time), new Date(s.start_time)) / 60
   }
 
   function formatDuration(s: any): string {
+    if (s.category === 'Tournament') return '—'
     const mins = differenceInMinutes(new Date(s.end_time), new Date(s.start_time))
     const h = Math.floor(mins / 60)
     const m = mins % 60
@@ -178,18 +188,20 @@ export default function Dashboard() {
   }
 
   const handleEdit = (session: any) => {
+    const isTournament = session.category === 'Tournament'
     setEditingId(session.id)
+    setFormMode(isTournament ? 'tournament' : 'work')
     setNewSession({
       date: session.date,
-      start_time: format(new Date(session.start_time), 'HH:mm'),
-      end_time: format(new Date(session.end_time), 'HH:mm'),
-      category: 'Padel lessons',
+      start_time: isTournament ? '00:00' : format(new Date(session.start_time), 'HH:mm'),
+      end_time: isTournament ? '00:00' : format(new Date(session.end_time), 'HH:mm'),
+      category: session.category || 'Padel lessons',
       paid: session.paid.toString(),
       location: session.location,
       notes: session.notes || '',
       amount: session.amount?.toString() || '',
       status: session.status,
-      session_type: session.session_type || 'Private'
+      session_type: session.session_type || (isTournament ? 'ZY' : 'Private')
     })
     setIsAdding(true)
   }
@@ -199,19 +211,24 @@ export default function Dashboard() {
     setLoading(true)
 
     try {
-      const start = new Date(`${newSession.date}T${newSession.start_time}:00`)
-      const end = new Date(`${newSession.date}T${newSession.end_time}:00`)
+      const isTournament = formMode === 'tournament'
+      const start = isTournament
+        ? new Date(`${newSession.date}T00:00:00`)
+        : new Date(`${newSession.date}T${newSession.start_time}:00`)
+      const end = isTournament
+        ? new Date(`${newSession.date}T00:00:00`)
+        : new Date(`${newSession.date}T${newSession.end_time}:00`)
 
       const sessionData = {
         date: newSession.date,
         start_time: start.toISOString(),
         end_time: end.toISOString(),
-        category: 'Padel lessons',
+        category: isTournament ? 'Tournament' : 'Padel lessons',
         paid: newSession.paid === 'true',
         location: newSession.location,
         notes: newSession.notes,
         amount: newSession.amount ? parseFloat(newSession.amount) : null,
-        status: newSession.status,
+        status: isTournament ? 'completed' : newSession.status,
         session_type: newSession.session_type
       }
 
@@ -221,9 +238,12 @@ export default function Dashboard() {
 
       if (error) throw error
 
-      toast.success(editingId ? 'Session updated successfully' : 'Session added successfully')
+      toast.success(editingId 
+        ? (isTournament ? 'Tournament updated' : 'Session updated successfully')
+        : (isTournament ? '🏆 Tournament logged!' : 'Session added successfully'))
       setIsAdding(false)
       setEditingId(null)
+      setFormMode('work')
       setNewSession({
         date: format(new Date(), 'yyyy-MM-dd'),
         start_time: '09:00',
@@ -377,6 +397,11 @@ export default function Dashboard() {
   const totalEarnings = paidEarnings + unpaidEarnings
   const totalSessions = filteredSessions.length
   const avgPerSession = totalSessions > 0 ? totalEarnings / totalSessions : 0
+
+  // ─── Tournament Stats ──────────────────────────────────────────────────────
+  const tournamentSessions = filteredSessions.filter(s => s.category === 'Tournament')
+  const tournamentEarnings = tournamentSessions.reduce((acc, s) => acc + (parseFloat(s.amount) || 0), 0)
+  const workEarnings = totalEarnings - tournamentEarnings
 
   // ─── Chart Data ─────────────────────────────────────────────────────────────
   const chartData = useMemo(() => {
@@ -578,19 +603,22 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          {/* Avg Per Session */}
+          {/* Tournaments */}
           <Card className="glass-card glass-card-glow-amber animate-fade-in-up" style={{ animationDelay: '0.3s' }}>
             <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3">
-              <CardTitle className="text-[10px] uppercase tracking-wider font-medium text-amber-400/80">Avg / Session</CardTitle>
+              <CardTitle className="text-[10px] uppercase tracking-wider font-medium text-amber-400/80">Tournaments</CardTitle>
               <div className="icon-bg-amber rounded-md p-1.5">
-                <Target className="h-3 w-3 text-amber-400" />
+                <Trophy className="h-3 w-3 text-amber-400" />
               </div>
             </CardHeader>
             <CardContent className="px-3 pb-3 pt-0">
               <div className="text-2xl font-bold text-white">
-                <AnimatedNumber value={Math.round(avgPerSession)} />
+                <AnimatedNumber value={Math.round(tournamentEarnings)} />
               </div>
-              <p className="text-[9px] text-muted-foreground mt-1">AED / session</p>
+              <div className="flex flex-col mt-0.5">
+                <span className="text-[9px] text-amber-400 font-medium">🏆 {tournamentSessions.length} tournament{tournamentSessions.length !== 1 ? 's' : ''}</span>
+                <span className="text-[9px] text-muted-foreground">AED prize money</span>
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -1036,8 +1064,53 @@ export default function Dashboard() {
         {isAdding && (
           <Card className="glass-card border-primary/30 animate-in fade-in slide-in-from-top-4 duration-300">
             <CardHeader>
-              <CardTitle className="text-white">{editingId ? 'Edit Session' : 'Log New Work Session'}</CardTitle>
-              <CardDescription>Enter the details of your work session below.</CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-white">
+                    {editingId 
+                      ? (formMode === 'tournament' ? 'Edit Tournament' : 'Edit Session') 
+                      : (formMode === 'tournament' ? '🏆 Log Tournament Result' : 'Log New Work Session')}
+                  </CardTitle>
+                  <CardDescription>
+                    {formMode === 'tournament' 
+                      ? 'Record your tournament result and prize money.' 
+                      : 'Enter the details of your work session below.'}
+                  </CardDescription>
+                </div>
+                {/* Work / Tournament Toggle */}
+                <div className="flex items-center gap-1 bg-muted/50 p-0.5 rounded-lg">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFormMode('work')
+                      setNewSession(s => ({ ...s, session_type: 'Private' }))
+                    }}
+                    className={cn(
+                      "px-3 py-1.5 text-[11px] font-medium rounded-md transition-all flex items-center gap-1",
+                      formMode === 'work' 
+                        ? "bg-primary text-primary-foreground shadow-sm" 
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    📋 Work
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFormMode('tournament')
+                      setNewSession(s => ({ ...s, session_type: 'ZY', status: 'completed' }))
+                    }}
+                    className={cn(
+                      "px-3 py-1.5 text-[11px] font-medium rounded-md transition-all flex items-center gap-1",
+                      formMode === 'tournament' 
+                        ? "bg-amber-500 text-white shadow-sm" 
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    🏆 Tournament
+                  </button>
+                </div>
+              </div>
             </CardHeader>
             <form onSubmit={handleAddSession}>
               <CardContent className="grid gap-6 md:grid-cols-4">
@@ -1045,60 +1118,94 @@ export default function Dashboard() {
                   <Label>Date</Label>
                   <Input type="date" value={newSession.date} onChange={e => setNewSession({ ...newSession, date: e.target.value })} required className="bg-accent/50" />
                 </div>
+
+                {/* Start/End Time — only for work sessions */}
+                {formMode === 'work' && (
+                  <>
+                    <div className="space-y-2">
+                      <Label>Start Time</Label>
+                      <Input type="time" value={newSession.start_time} onChange={e => setNewSession({ ...newSession, start_time: e.target.value })} required className="bg-accent/50" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>End Time</Label>
+                      <Input type="time" value={newSession.end_time} onChange={e => setNewSession({ ...newSession, end_time: e.target.value })} required className="bg-accent/50" />
+                    </div>
+                  </>
+                )}
+
+                {/* Tournament Provider — only for tournaments */}
+                {formMode === 'tournament' && (
+                  <div className="space-y-2">
+                    <Label>Tournament</Label>
+                    <Select value={newSession.session_type} onValueChange={v => setNewSession({ ...newSession, session_type: v })}>
+                      <SelectTrigger className="bg-accent/50">
+                        <SelectValue placeholder="Select tournament..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {TOURNAMENT_PROVIDERS.map(t => (
+                          <SelectItem key={t} value={t}>🏆 {t}</SelectItem>
+                        ))}
+                        <SelectItem value="Other">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
                 <div className="space-y-2">
-                  <Label>Start Time</Label>
-                  <Input type="time" value={newSession.start_time} onChange={e => setNewSession({ ...newSession, start_time: e.target.value })} required className="bg-accent/50" />
-                </div>
-                <div className="space-y-2">
-                  <Label>End Time</Label>
-                  <Input type="time" value={newSession.end_time} onChange={e => setNewSession({ ...newSession, end_time: e.target.value })} required className="bg-accent/50" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Paid Status</Label>
+                  <Label>{formMode === 'tournament' ? 'Prize Received?' : 'Paid Status'}</Label>
                   <Select value={newSession.paid} onValueChange={v => setNewSession({ ...newSession, paid: v })}>
                     <SelectTrigger className="bg-accent/50">
                       <SelectValue placeholder="Paid or Unpaid?" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="true">Paid</SelectItem>
-                      <SelectItem value="false">Unpaid</SelectItem>
+                      <SelectItem value="true">{formMode === 'tournament' ? 'Yes — Received' : 'Paid'}</SelectItem>
+                      <SelectItem value="false">{formMode === 'tournament' ? 'Not yet' : 'Unpaid'}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
+
+                {/* Session Type — only for work */}
+                {formMode === 'work' && (
+                  <div className="space-y-2">
+                    <Label>Session Type</Label>
+                    <Select value={newSession.session_type} onValueChange={v => setNewSession({ ...newSession, session_type: v })}>
+                      <SelectTrigger className="bg-accent/50">
+                        <SelectValue placeholder="Session Type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Private">Private</SelectItem>
+                        <SelectItem value="Semi-private">Semi-private</SelectItem>
+                        <SelectItem value="Trio">Trio</SelectItem>
+                        <SelectItem value="Group">Group</SelectItem>
+                        <SelectItem value="Project Work">Project Work</SelectItem>
+                        <SelectItem value="Other">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {/* Work Status — only for work */}
+                {formMode === 'work' && (
+                  <div className="space-y-2">
+                    <Label>Work Status</Label>
+                    <Select value={newSession.status} onValueChange={v => setNewSession({ ...newSession, status: v })}>
+                      <SelectTrigger className="bg-accent/50">
+                        <SelectValue placeholder="Status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="completed">Completed</SelectItem>
+                        <SelectItem value="in_progress">In Progress</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
                 <div className="space-y-2">
-                  <Label>Session Type</Label>
-                  <Select value={newSession.session_type} onValueChange={v => setNewSession({ ...newSession, session_type: v })}>
-                    <SelectTrigger className="bg-accent/50">
-                      <SelectValue placeholder="Session Type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Private">Private</SelectItem>
-                      <SelectItem value="Semi-private">Semi-private</SelectItem>
-                      <SelectItem value="Trio">Trio</SelectItem>
-                      <SelectItem value="Group">Group</SelectItem>
-                      <SelectItem value="Project Work">Project Work</SelectItem>
-                      <SelectItem value="Other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Work Status</Label>
-                  <Select value={newSession.status} onValueChange={v => setNewSession({ ...newSession, status: v })}>
-                    <SelectTrigger className="bg-accent/50">
-                      <SelectValue placeholder="Status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="completed">Completed</SelectItem>
-                      <SelectItem value="in_progress">In Progress</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Amount (Optional)</Label>
+                  <Label>{formMode === 'tournament' ? 'Prize Money (AED)' : 'Amount (Optional)'}</Label>
                   <Input type="number" placeholder="0.00" value={newSession.amount} onChange={e => setNewSession({ ...newSession, amount: e.target.value })} className="bg-accent/50" />
                 </div>
                 <div className="space-y-2 md:col-span-2">
-                  <Label>Location</Label>
+                  <Label>{formMode === 'tournament' ? 'Venue / Location' : 'Location'}</Label>
                   <div className="flex gap-2">
                     <Select 
                       value={formLocations.includes(newSession.location) ? newSession.location : (newSession.location === '' ? '' : '__custom__')} 
@@ -1133,44 +1240,58 @@ export default function Dashboard() {
                   </div>
                 </div>
                 <div className="space-y-2 md:col-span-2">
-                  <Label>Client / Group Name</Label>
+                  <Label>{formMode === 'tournament' ? 'Partner / Notes' : 'Client / Group Name'}</Label>
                   <div className="flex gap-2">
-                    <Select 
-                      value={existingClients.includes(newSession.notes) ? newSession.notes : (newSession.notes === '' ? '' : '__custom__')} 
-                      onValueChange={v => {
-                        if (v === '__custom__') {
-                          setNewSession({ ...newSession, notes: '' })
-                        } else {
-                          setNewSession({ ...newSession, notes: v })
-                        }
-                      }}
-                    >
-                      <SelectTrigger className="bg-accent/50 flex-1">
-                        <SelectValue placeholder="Select client..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__custom__">+ Add Custom Name</SelectItem>
-                        {existingClients.map(c => (
-                          <SelectItem key={c} value={c}>👤 {c}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    
-                    {(!existingClients.includes(newSession.notes) || newSession.notes === '') && (
+                    {formMode === 'work' ? (
+                      <>
+                        <Select 
+                          value={existingClients.includes(newSession.notes) ? newSession.notes : (newSession.notes === '' ? '' : '__custom__')} 
+                          onValueChange={v => {
+                            if (v === '__custom__') {
+                              setNewSession({ ...newSession, notes: '' })
+                            } else {
+                              setNewSession({ ...newSession, notes: v })
+                            }
+                          }}
+                        >
+                          <SelectTrigger className="bg-accent/50 flex-1">
+                            <SelectValue placeholder="Select client..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__custom__">+ Add Custom Name</SelectItem>
+                            {existingClients.map(c => (
+                              <SelectItem key={c} value={c}>👤 {c}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {(!existingClients.includes(newSession.notes) || newSession.notes === '') && (
+                          <Input 
+                            placeholder="Enter client name" 
+                            value={newSession.notes} 
+                            onChange={e => setNewSession({ ...newSession, notes: e.target.value })} 
+                            className="bg-accent/50 flex-1 animate-in fade-in"
+                            required
+                          />
+                        )}
+                      </>
+                    ) : (
                       <Input 
-                        placeholder="Enter client name" 
+                        placeholder="e.g. Partner name, tournament details..." 
                         value={newSession.notes} 
                         onChange={e => setNewSession({ ...newSession, notes: e.target.value })} 
-                        className="bg-accent/50 flex-1 animate-in fade-in"
-                        required
+                        className="bg-accent/50 flex-1"
                       />
                     )}
                   </div>
                 </div>
               </CardContent>
               <CardFooter className="flex justify-end gap-2">
-                <Button variant="ghost" type="button" onClick={() => { setIsAdding(false); setEditingId(null); }}>Cancel</Button>
-                <Button type="submit" disabled={loading} className="shadow-glow-green">{editingId ? 'Update Session' : 'Save Session'}</Button>
+                <Button variant="ghost" type="button" onClick={() => { setIsAdding(false); setEditingId(null); setFormMode('work'); }}>Cancel</Button>
+                <Button type="submit" disabled={loading} className={formMode === 'tournament' ? "shadow-glow-amber bg-amber-500 hover:bg-amber-600 text-white" : "shadow-glow-green"}>
+                  {editingId 
+                    ? (formMode === 'tournament' ? 'Update Tournament' : 'Update Session') 
+                    : (formMode === 'tournament' ? '🏆 Save Tournament' : 'Save Session')}
+                </Button>
               </CardFooter>
             </form>
           </Card>
@@ -1194,7 +1315,9 @@ export default function Dashboard() {
           <div className="space-y-4">
             {sortedDateKeys.map((dateKey) => {
               const dateSessions = groupedSessions[dateKey]
-              const dayHours = dateSessions.reduce((acc: number, s: any) => acc + getDurationHours(s), 0)
+              const workSessionsInDay = dateSessions.filter((s: any) => s.category !== 'Tournament')
+              const tournamentsInDay = dateSessions.filter((s: any) => s.category === 'Tournament')
+              const dayHours = workSessionsInDay.reduce((acc: number, s: any) => acc + getDurationHours(s), 0)
               const dayEarnings = dateSessions.reduce((acc: number, s: any) => acc + (parseFloat(s.amount) || 0), 0)
               const isTodayDate = isToday(parseISO(dateKey))
               return (
@@ -1226,7 +1349,10 @@ export default function Dashboard() {
                       {dayEarnings > 0 && (
                         <span className="text-[10px] md:text-xs text-green-400 font-medium">{dayEarnings.toLocaleString()} AED</span>
                       )}
-                      <span className="text-[10px] md:text-xs text-muted-foreground">{dateSessions.length}× · {Math.round(dayHours * 10) / 10}h</span>
+                      <span className="text-[10px] md:text-xs text-muted-foreground">
+                        {workSessionsInDay.length > 0 && <>{workSessionsInDay.length}× · {Math.round(dayHours * 10) / 10}h</>}
+                        {tournamentsInDay.length > 0 && <>{workSessionsInDay.length > 0 ? ' · ' : ''}🏆 {tournamentsInDay.length}</>}
+                      </span>
                     </div>
                   </div>
                   <div className="divide-y divide-border/30">
@@ -1235,19 +1361,32 @@ export default function Dashboard() {
                         key={session.id} 
                         className={cn(
                           "px-3 md:px-4 py-3 hover:bg-accent/20 transition-colors border-l-2",
-                          session.paid ? "border-l-green-500/50" : "border-l-yellow-500/50"
+                          session.category === 'Tournament' 
+                            ? "border-l-amber-500/70" 
+                            : session.paid ? "border-l-green-500/50" : "border-l-yellow-500/50"
                         )}
                       >
                         {/* Desktop row */}
                         <div className="hidden md:flex items-center justify-between">
                           <div className="flex items-center gap-6 flex-1 min-w-0">
                             <div className="w-[100px] shrink-0">
-                              <span className="font-medium text-white">
-                                {format(new Date(session.start_time), 'HH:mm')} - {format(new Date(session.end_time), 'HH:mm')}
-                              </span>
-                              <div className="text-[11px] text-muted-foreground">{formatDuration(session)}</div>
+                              {session.category === 'Tournament' ? (
+                                <>
+                                  <span className="font-medium text-amber-400 flex items-center gap-1">🏆 {session.session_type}</span>
+                                  <div className="text-[11px] text-muted-foreground">Tournament</div>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="font-medium text-white">
+                                    {format(new Date(session.start_time), 'HH:mm')} - {format(new Date(session.end_time), 'HH:mm')}
+                                  </span>
+                                  <div className="text-[11px] text-muted-foreground">{formatDuration(session)}</div>
+                                </>
+                              )}
                             </div>
-                            <div className="w-[90px] shrink-0 text-muted-foreground text-sm">{session.session_type || 'Other'}</div>
+                            <div className="w-[90px] shrink-0 text-muted-foreground text-sm">
+                              {session.category === 'Tournament' ? 'Prize' : (session.session_type || 'Other')}
+                            </div>
                             <div className="w-[120px] shrink-0 text-muted-foreground text-sm">{session.location}</div>
                             <button
                               onClick={() => togglePaidStatus(session.id, session.paid)}
@@ -1273,13 +1412,19 @@ export default function Dashboard() {
                         {/* Mobile card */}
                         <div className="md:hidden">
                           <div className="flex items-center gap-2 mb-1">
-                            <span className="font-semibold text-white">
-                              {format(new Date(session.start_time), 'HH:mm')} - {format(new Date(session.end_time), 'HH:mm')}
-                            </span>
-                            <span className="text-[11px] text-muted-foreground">({formatDuration(session)})</span>
+                            {session.category === 'Tournament' ? (
+                              <span className="font-semibold text-amber-400">🏆 {session.session_type} Tournament</span>
+                            ) : (
+                              <>
+                                <span className="font-semibold text-white">
+                                  {format(new Date(session.start_time), 'HH:mm')} - {format(new Date(session.end_time), 'HH:mm')}
+                                </span>
+                                <span className="text-[11px] text-muted-foreground">({formatDuration(session)})</span>
+                              </>
+                            )}
                           </div>
                           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs mb-2">
-                            <span className="text-muted-foreground">{session.session_type || 'Other'}</span>
+                            {session.category !== 'Tournament' && <span className="text-muted-foreground">{session.session_type || 'Other'}</span>}
                             <span className="text-muted-foreground">📍 {session.location}</span>
                             {session.notes && session.notes !== '-' && <span className="text-muted-foreground">👤 {session.notes}</span>}
                           </div>
