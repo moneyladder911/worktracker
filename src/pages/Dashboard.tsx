@@ -694,19 +694,23 @@ export default function Dashboard() {
         </div>
 
         {/* ─── Lesson Packages ──────────────────────────────────────────────── */}
-        {(packages.length > 0 || isAddingPackage) && (
-          <Card className="glass-card animate-fade-in-up" style={{ animationDelay: '0.12s' }}>
-            <CardHeader className="flex flex-row items-center justify-between pb-2 pt-4 px-4">
-              <div>
-                <CardTitle className="text-sm font-semibold text-white flex items-center gap-1.5">📦 Lesson Packages</CardTitle>
-                <p className="text-xs text-muted-foreground mt-0.5">Prepaid bundles — track progress per client</p>
+        <Card className="glass-card animate-fade-in-up" style={{ animationDelay: '0.12s' }}>
+          <CardHeader className="flex flex-row items-center justify-between pb-2 pt-4 px-4">
+            <div>
+              <CardTitle className="text-sm font-semibold text-white flex items-center gap-1.5">📦 Lesson Packages</CardTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">Prepaid bundles — track progress per client</p>
+            </div>
+            <Button size="sm" onClick={() => setIsAddingPackage(true)} className="bg-blue-500 hover:bg-blue-600 text-white text-xs">
+              <Plus className="mr-1 h-3 w-3" /> New Package
+            </Button>
+          </CardHeader>
+          <CardContent className="px-4 pb-4 space-y-2">
+            {packages.length === 0 && !isAddingPackage && (
+              <div className="text-center py-4 text-muted-foreground text-sm">
+                No active packages. Click "New Package" to add a prepaid bundle.
               </div>
-              <Button size="sm" onClick={() => setIsAddingPackage(true)} className="bg-blue-500 hover:bg-blue-600 text-white text-xs">
-                <Plus className="mr-1 h-3 w-3" /> New
-              </Button>
-            </CardHeader>
-            <CardContent className="px-4 pb-4 space-y-2">
-              {isAddingPackage && (
+            )}
+            {isAddingPackage && (
                 <form onSubmit={handleAddPackage} className="p-3 rounded-xl bg-accent/20 border border-border/50 space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
                   <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
                     <div className="space-y-1 col-span-2 md:col-span-1">
@@ -803,7 +807,6 @@ export default function Dashboard() {
               })()}
             </CardContent>
           </Card>
-        )}
 
         {/* ─── Earnings Chart ──────────────────────────────────────────────── */}
         <Card className="glass-card animate-fade-in-up" style={{ animationDelay: '0.15s' }}>
