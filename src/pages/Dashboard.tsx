@@ -124,6 +124,18 @@ export default function Dashboard() {
   const [activeView, setActiveView] = useState<'upcoming' | 'unpaid' | 'all'>('upcoming')
   const [chartMode, setChartMode] = useState<'daily' | 'weekly' | 'monthly'>('daily')
   const [formMode, setFormMode] = useState<'work' | 'tournament'>('work')
+  const [packages, setPackages] = useState<any[]>([])
+  const [isAddingPackage, setIsAddingPackage] = useState(false)
+  const [editingPackageId, setEditingPackageId] = useState<string | null>(null)
+  const [showCompletedPkgs, setShowCompletedPkgs] = useState(false)
+  const [newPackage, setNewPackage] = useState({
+    client_name: '',
+    total_lessons: '5',
+    total_amount: '',
+    paid_date: format(new Date(), 'yyyy-MM-dd'),
+    location: 'PadelOne',
+    notes: ''
+  })
   const [newSession, setNewSession] = useState({
     date: format(new Date(), 'yyyy-MM-dd'),
     start_time: '09:00',
@@ -134,11 +146,13 @@ export default function Dashboard() {
     notes: '',
     amount: '',
     status: 'completed',
-    session_type: 'Private'
+    session_type: 'Private',
+    package_id: '' as string
   })
 
   useEffect(() => {
     fetchSessions()
+    fetchPackages()
   }, [])
 
   useEffect(() => {
@@ -187,6 +201,57 @@ export default function Dashboard() {
     }
   }
 
+  async function fetchPackages() {
+    try {
+      const { data, error } = await supabase
+        .from('lesson_packages')
+        .select('*')
+        .order('created_at', { ascending: false })
+      if (error) throw error
+      setPackages(data || [])
+    } catch {
+      // Table might not exist yet
+    }
+  }
+
+  async function handleAddPackage(e: React.FormEvent) {
+    e.preventDefault()
+    try {
+      const pkgData = {
+        client_name: newPackage.client_name,
+        total_lessons: parseInt(newPackage.total_lessons),
+        total_amount: parseFloat(newPackage.total_amount),
+        paid_date: newPackage.paid_date,
+        location: newPackage.location,
+        notes: newPackage.notes || null
+      }
+      const { error } = editingPackageId
+        ? await supabase.from('lesson_packages').update(pkgData).eq('id', editingPackageId)
+        : await supabase.from('lesson_packages').insert(pkgData)
+      if (error) throw error
+      toast.success(editingPackageId ? 'Package updated' : '📦 Package created!')
+      setIsAddingPackage(false)
+      setEditingPackageId(null)
+      setNewPackage({ client_name: '', total_lessons: '5', total_amount: '', paid_date: format(new Date(), 'yyyy-MM-dd'), location: 'PadelOne', notes: '' })
+      fetchPackages()
+    } catch (error: any) {
+      toast.error(error.message)
+    }
+  }
+
+  async function deletePackage(id: string) {
+    if (!confirm('Delete this package? Linked sessions will be kept but unlinked.')) return
+    try {
+      const { error } = await supabase.from('lesson_packages').delete().eq('id', id)
+      if (error) throw error
+      toast.success('Package deleted')
+      fetchPackages()
+      fetchSessions()
+    } catch (error: any) {
+      toast.error(error.message)
+    }
+  }
+
   const handleEdit = (session: any) => {
     const isTournament = session.category === 'Tournament'
     setEditingId(session.id)
@@ -201,7 +266,8 @@ export default function Dashboard() {
       notes: session.notes || '',
       amount: session.amount?.toString() || '',
       status: session.status,
-      session_type: session.session_type || (isTournament ? 'ZY' : 'Private')
+      session_type: session.session_type || (isTournament ? 'ZY' : 'Private'),
+      package_id: session.package_id || ''
     })
     setIsAdding(true)
   }
@@ -219,17 +285,19 @@ export default function Dashboard() {
         ? new Date(`${newSession.date}T00:00:00`)
         : new Date(`${newSession.date}T${newSession.end_time}:00`)
 
+      const hasPackage = !!newSession.package_id
       const sessionData = {
         date: newSession.date,
         start_time: start.toISOString(),
         end_time: end.toISOString(),
         category: isTournament ? 'Tournament' : 'Padel lessons',
-        paid: newSession.paid === 'true',
+        paid: hasPackage ? true : newSession.paid === 'true',
         location: newSession.location,
         notes: newSession.notes,
         amount: newSession.amount ? parseFloat(newSession.amount) : null,
         status: isTournament ? 'completed' : newSession.status,
-        session_type: newSession.session_type
+        session_type: newSession.session_type,
+        package_id: newSession.package_id || null
       }
 
       const { error } = editingId
@@ -254,9 +322,11 @@ export default function Dashboard() {
         notes: '',
         amount: '',
         status: 'completed',
-        session_type: 'Private'
+        session_type: 'Private',
+        package_id: ''
       })
       fetchSessions()
+      fetchPackages()
     } catch (error: any) {
       toast.error(error.message)
     } finally {
@@ -622,6 +692,118 @@ export default function Dashboard() {
             </CardContent>
           </Card>
         </div>
+
+        {/* ─── Lesson Packages ──────────────────────────────────────────────── */}
+        {(packages.length > 0 || isAddingPackage) && (
+          <Card className="glass-card animate-fade-in-up" style={{ animationDelay: '0.12s' }}>
+            <CardHeader className="flex flex-row items-center justify-between pb-2 pt-4 px-4">
+              <div>
+                <CardTitle className="text-sm font-semibold text-white flex items-center gap-1.5">📦 Lesson Packages</CardTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">Prepaid bundles — track progress per client</p>
+              </div>
+              <Button size="sm" onClick={() => setIsAddingPackage(true)} className="bg-blue-500 hover:bg-blue-600 text-white text-xs">
+                <Plus className="mr-1 h-3 w-3" /> New
+              </Button>
+            </CardHeader>
+            <CardContent className="px-4 pb-4 space-y-2">
+              {isAddingPackage && (
+                <form onSubmit={handleAddPackage} className="p-3 rounded-xl bg-accent/20 border border-border/50 space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
+                  <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
+                    <div className="space-y-1 col-span-2 md:col-span-1">
+                      <Label className="text-xs">Client Name</Label>
+                      <Input placeholder="e.g. Ahmed" value={newPackage.client_name} onChange={e => setNewPackage({ ...newPackage, client_name: e.target.value })} required className="bg-accent/50 h-9 text-sm" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Lessons</Label>
+                      <Input type="number" min="1" value={newPackage.total_lessons} onChange={e => setNewPackage({ ...newPackage, total_lessons: e.target.value })} required className="bg-accent/50 h-9 text-sm" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Total Paid (AED)</Label>
+                      <Input type="number" placeholder="2000" value={newPackage.total_amount} onChange={e => setNewPackage({ ...newPackage, total_amount: e.target.value })} required className="bg-accent/50 h-9 text-sm" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Paid Date</Label>
+                      <Input type="date" value={newPackage.paid_date} onChange={e => setNewPackage({ ...newPackage, paid_date: e.target.value })} required className="bg-accent/50 h-9 text-sm" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Location</Label>
+                      <Select value={newPackage.location} onValueChange={v => setNewPackage({ ...newPackage, location: v })}>
+                        <SelectTrigger className="bg-accent/50 h-9 text-sm"><SelectValue /></SelectTrigger>
+                        <SelectContent>{formLocations.map(loc => (<SelectItem key={loc} value={loc}>📍 {loc}</SelectItem>))}</SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Notes</Label>
+                      <Input placeholder="optional" value={newPackage.notes} onChange={e => setNewPackage({ ...newPackage, notes: e.target.value })} className="bg-accent/50 h-9 text-sm" />
+                    </div>
+                  </div>
+                  {parseInt(newPackage.total_lessons) > 0 && parseFloat(newPackage.total_amount) > 0 && (
+                    <p className="text-xs text-muted-foreground">→ {(parseFloat(newPackage.total_amount) / parseInt(newPackage.total_lessons)).toFixed(0)} AED per lesson</p>
+                  )}
+                  <div className="flex justify-end gap-2">
+                    <Button type="button" variant="ghost" size="sm" onClick={() => { setIsAddingPackage(false); setEditingPackageId(null) }}>Cancel</Button>
+                    <Button type="submit" size="sm" className="bg-blue-500 hover:bg-blue-600 text-white">{editingPackageId ? 'Update' : 'Create Package'}</Button>
+                  </div>
+                </form>
+              )}
+              {(() => {
+                const activePkgs = packages.filter(pkg => sessions.filter(s => s.package_id === pkg.id).length < pkg.total_lessons)
+                const donePkgs = packages.filter(pkg => sessions.filter(s => s.package_id === pkg.id).length >= pkg.total_lessons)
+                return (
+                  <>
+                    {activePkgs.map(pkg => {
+                      const done = sessions.filter(s => s.package_id === pkg.id).length
+                      const pct = (done / pkg.total_lessons) * 100
+                      const perLesson = pkg.total_amount / pkg.total_lessons
+                      return (
+                        <div key={pkg.id} className="p-3 rounded-xl bg-accent/15 border border-border/50 hover:border-blue-500/30 transition-all group">
+                          <div className="flex items-center justify-between mb-1.5">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-semibold text-white text-sm">👤 {pkg.client_name}</span>
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 font-medium">{done}/{pkg.total_lessons} lessons</span>
+                            </div>
+                            <div className="flex items-center gap-1 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => {
+                                setFormMode('work')
+                                setNewSession(s => ({ ...s, notes: pkg.client_name, location: pkg.location || 'PadelOne', amount: perLesson.toString(), paid: 'true', package_id: pkg.id }))
+                                setIsAdding(true)
+                              }}><Plus className="h-3.5 w-3.5" /></Button>
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => deletePackage(pkg.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3 text-[11px] text-muted-foreground mb-2 flex-wrap">
+                            <span>📍 {pkg.location}</span>
+                            <span className="text-green-400 font-medium">{pkg.total_amount.toLocaleString()} AED</span>
+                            <span>→ {perLesson.toFixed(0)} AED/lesson</span>
+                            {pkg.notes && <span>· {pkg.notes}</span>}
+                          </div>
+                          <div className="h-1.5 bg-muted/50 rounded-full overflow-hidden">
+                            <div className="h-full rounded-full transition-all duration-700 ease-out" style={{ width: `${pct}%`, background: 'linear-gradient(90deg, #3b82f6, #60a5fa)' }} />
+                          </div>
+                        </div>
+                      )
+                    })}
+                    {donePkgs.length > 0 && (
+                      <div>
+                        <button onClick={() => setShowCompletedPkgs(!showCompletedPkgs)} className="text-[11px] text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1 mt-1">
+                          {showCompletedPkgs ? '▼' : '▶'} {donePkgs.length} completed
+                        </button>
+                        {showCompletedPkgs && donePkgs.map(pkg => (
+                          <div key={pkg.id} className="p-2.5 rounded-xl bg-accent/10 border border-border/30 opacity-60 mt-1.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm text-white">✅ {pkg.client_name} — {pkg.total_lessons}/{pkg.total_lessons}</span>
+                              <span className="text-[11px] text-muted-foreground">{pkg.total_amount.toLocaleString()} AED · {(pkg.total_amount / pkg.total_lessons).toFixed(0)}/lesson</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )
+              })()}
+            </CardContent>
+          </Card>
+        )}
 
         {/* ─── Earnings Chart ──────────────────────────────────────────────── */}
         <Card className="glass-card animate-fade-in-up" style={{ animationDelay: '0.15s' }}>
